@@ -1,0 +1,12 @@
+torch
+torchvision
+opencv-python
+albumentations
+scikit-learn
+matplotlib
+seaborn
+lime
+shap
+streamlit
+numpy
+pandas

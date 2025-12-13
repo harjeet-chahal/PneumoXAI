@@ -1,0 +1,42 @@
+# --- OS ---
+.DS_Store
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# --- Environments ---
+venv/
+.venv/
+
+# --- Secrets ---
+.env
+*.key
+*.pem
+
+# --- Data (DON'T COMMIT DATASETS) ---
+data/raw/
+data/processed/
+data/interim/
+
+# --- Model artifacts / weights (optional but recommended) ---
+models/*.pt
+models/*.pth
+models/*.ckpt
+models/*.onnx
+models/*.h5
+models/*.pkl
+models/*.joblib
+
+# --- Logs / outputs ---
+logs/
+runs/
+outputs/
+*.log
+
+# --- Notebooks ---
+.ipynb_checkpoints/
