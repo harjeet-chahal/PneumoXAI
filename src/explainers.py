@@ -7,6 +7,8 @@ from lime import lime_image
 from skimage.segmentation import mark_boundaries
 import shap
 import matplotlib.pyplot as plt
+from skimage.metrics import structural_similarity as ssim
+import copy
 
 # Normalization constants
 MEAN = np.array([0.485, 0.456, 0.406])
@@ -99,7 +101,77 @@ def get_gradcam(model, input_tensor, target_layer=None):
     superimposed_img = heatmap * 0.4 + orig_img
     superimposed_img = np.clip(superimposed_img, 0, 255).astype(np.uint8)
     
-    return superimposed_img
+    return superimposed_img, mask
+
+def calculate_iou_attention(gradcam_map, lime_mask, threshold=0.5):
+    """
+    Computes Intersection over Union (IoU) between Grad-CAM and LIME.
+    gradcam_map: (H, W) float [0-1]
+    lime_mask: (H, W) binary [0, 1]
+    """
+    # Binarize Grad-CAM
+    gradcam_binary = (gradcam_map > threshold).astype(int)
+    lime_binary = lime_mask.astype(int)
+    
+    intersection = np.logical_and(gradcam_binary, lime_binary)
+    union = np.logical_or(gradcam_binary, lime_binary)
+    
+    iou_score = np.sum(intersection) / (np.sum(union) + 1e-7)
+    return iou_score
+
+def sanity_check_gradcam(original_model, input_tensor, target_layer=None):
+    """
+    Performs the Randomization Test (Sanity Check) for Grad-CAM.
+    Compares Grad-CAM from the trained model vs. a model with randomized weights.
+    High SSIM -> Check Failed (XAI is independent of weights).
+    Low SSIM -> Check Passed (XAI relies on learned weights).
+    
+    Returns: ssim_score, perturbed_heatmap_img
+    """
+    # 1. Get Original Grad-CAM
+    # Note: get_gradcam returns an overlay RGB image. We need the raw mask or just compare heatmaps.
+    # The get_gradcam function encapsulates mask generation.
+    # We strip the mask returned now.
+    orig_overlay, _ = get_gradcam(original_model, input_tensor, target_layer)
+    orig_gray = cv2.cvtColor(orig_overlay, cv2.COLOR_RGB2GRAY)
+    
+    # 2. Randomize Model
+    # We copy the model to avoid destroying the running model
+    perturbed_model = copy.deepcopy(original_model)
+    
+    # Randomize the last convolutional layer (layer4) and the fc layer
+    # ResNet50 structure: layer4 is the last block.
+    def init_weights(m):
+        if isinstance(m, torch.nn.Conv2d) or isinstance(m, torch.nn.Linear):
+            torch.nn.init.xavier_uniform_(m.weight)
+            if m.bias is not None:
+                torch.nn.init.zeros_(m.bias)
+                
+    perturbed_model.model.layer4.apply(init_weights)
+    perturbed_model.model.fc.apply(init_weights)
+    
+    perturbed_model.to(next(original_model.parameters()).device)
+    perturbed_model.eval()
+    
+    # 3. Get Perturbed Grad-CAM
+    # Need to find the equivalent target layer in the new model instance
+    if target_layer is None:
+        new_target = perturbed_model.model.layer4[-1]
+    else:
+        # If user passed specific layer object, it belongs to original_model. 
+        # We can't easily map it to perturbed_model without knowing the path.
+        # Fallback to default behavior for sanity check if generic.
+         new_target = perturbed_model.model.layer4[-1]
+         
+         new_target = perturbed_model.model.layer4[-1]
+         
+    perturbed_overlay, _ = get_gradcam(perturbed_model, input_tensor, new_target)
+    perturbed_gray = cv2.cvtColor(perturbed_overlay, cv2.COLOR_RGB2GRAY)
+    
+    # 4. Compute SSIM
+    score, _ = ssim(orig_gray, perturbed_gray, full=True)
+    
+    return score, perturbed_overlay
 
 # --- LIME ---
 def get_lime_explanation(model, input_tensor):
@@ -179,7 +251,8 @@ def get_lime_explanation(model, input_tensor):
     # overlay boundaries on the image
     img_boundry = mark_boundaries(temp, mask)
     
-    return (img_boundry * 255).astype(np.uint8)
+    return (img_boundry * 255).astype(np.uint8), mask
+
 
 # --- SHAP ---
 def get_shap_explanation(model, input_tensor, background_batch):

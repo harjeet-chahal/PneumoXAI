@@ -15,7 +15,11 @@ class PneumoniaNet(nn.Module):
         # Replace the final fully connected layer
         # Output is 1 feature (logits) for binary classification
         num_ftrs = self.model.fc.in_features
-        self.model.fc = nn.Linear(num_ftrs, 1)
+        # Add Dropout for Monte Carlo Dropout uncertainty estimation
+        self.model.fc = nn.Sequential(
+            nn.Dropout(p=0.5),
+            nn.Linear(num_ftrs, 1)
+        )
 
     def forward(self, x):
         return self.model(x)
